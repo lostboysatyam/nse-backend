@@ -1,7 +1,6 @@
 from flask import Flask, jsonify
 from nse import NSE
 from pathlib import Path
-import pandas as pd
 import os
 
 app = Flask(__name__)
@@ -10,24 +9,33 @@ app = Flask(__name__)
 nse = NSE(download_folder=Path("."), server=False)
 
 def fetch_top_stocks(n=28):
-    # Fetch NIFTY TOTAL MARKET stocks
-    data = nse.listEquityStocksByIndex(index='NIFTY TOTAL MARKET')
-    stock_list = data.get("data", [])
+    # Fetch NIFTY TOTAL MARKET data
+    raw_data = nse.listEquityStocksByIndex(index='NIFTY TOTAL MARKET')
 
-    # Convert to DataFrame
-    df = pd.DataFrame(stock_list)
+    # Extract summary (advance/decline info)
+    summary = raw_data.get("advance", {})
 
-    # Keep only relevant columns
-    df = df[['symbol', 'pChange', 'totalTradedValue']]
+    # Extract stocks
+    stocks_raw = raw_data.get("data", [])
 
-    # Sort by pChange descending
-    df_sorted = df.sort_values(by='pChange', ascending=False)
+    # Keep only relevant fields and filter out summary rows
+    stocks = [
+        {
+            "symbol": stock["symbol"],
+            "pChange": stock.get("pChange", 0),
+            "totalTradedValue": stock.get("totalTradedValue", 0)
+        }
+        for stock in stocks_raw if stock.get("priority", 0) == 0
+    ]
 
-    # Take top n
-    top_stocks = df_sorted.head(n)
+    # Sort by pChange descending and take top n
+    top_stocks = sorted(stocks, key=lambda x: x["pChange"], reverse=True)[:n]
 
-    # Convert to list of dicts
-    return top_stocks.to_dict(orient='records')
+    # Return combined dict
+    return {
+        "summary": summary,
+        "stocks": top_stocks
+    }
 
 @app.route("/top-stocks", methods=['GET'])
 def top_stocks():
