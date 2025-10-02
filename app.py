@@ -1,24 +1,20 @@
 from flask import Flask, jsonify
+from flask_cors import CORS  # <- import CORS
 from nse import NSE
 from pathlib import Path
 import os
 
 app = Flask(__name__)
+CORS(app)  # <- enable CORS for all routes
 
 # Initialize NSE
 nse = NSE(download_folder=Path("."), server=False)
 
 def fetch_top_stocks(n=28):
-    # Fetch NIFTY TOTAL MARKET data
     raw_data = nse.listEquityStocksByIndex(index='NIFTY TOTAL MARKET')
-
-    # Extract summary (advance/decline info)
     summary = raw_data.get("advance", {})
-
-    # Extract stocks
     stocks_raw = raw_data.get("data", [])
 
-    # Keep only relevant fields and filter out summary rows
     stocks = [
         {
             "symbol": stock["symbol"],
@@ -28,10 +24,8 @@ def fetch_top_stocks(n=28):
         for stock in stocks_raw if stock.get("priority", 0) == 0
     ]
 
-    # Sort by pChange descending and take top n
     top_stocks = sorted(stocks, key=lambda x: x["pChange"], reverse=True)[:n]
 
-    # Return combined dict
     return {
         "summary": summary,
         "stocks": top_stocks
