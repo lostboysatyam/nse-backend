@@ -10,7 +10,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Initialize NSE
-nse = NSE(download_folder=Path("."), server=False)
+nse = NSE(download_folder=Path("."), server=True)
 
 # Remote endpoint to post symbols
 POST_ENDPOINT = "https://sat98-yfinchartdata.hf.space/update_symbols"
