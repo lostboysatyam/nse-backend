@@ -1,61 +1,84 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from nse import NSE
-from pathlib import Path
 import requests
-import os
+import pandas as pd
 import traceback
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-# Initialize NSE
-nse = NSE(download_folder=Path("."), server=True)
-
 # Remote endpoint to post symbols
 POST_ENDPOINT = "https://sat98-yfinchartdata.hf.space/update_symbols"
+
+# StockEdge headers
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+# StockEdge URL for composed index
+INDEX_URL = "https://api.stockedge.com/Api/SecurityDashboardApi/GetComposedIndexParts/100792?page=1&pageSize=1000&lang=en"
 
 
 def fetch_top_stocks(n=28):
     try:
-        # Fetch NSE data
-        raw_data = nse.listEquityStocksByIndex(index='NIFTY TOTAL MARKET')
-        if not raw_data or "data" not in raw_data:
-            raise ValueError("Invalid or empty data returned from NSE API")
+        # 1️⃣ Fetch StockEdge JSON data
+        resp = requests.get(INDEX_URL, headers=HEADERS, timeout=10)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise ValueError("Unexpected StockEdge data format")
 
-        summary = raw_data.get("advance", {})
-        stocks_raw = raw_data.get("data", [])
+        # 2️⃣ Convert to DataFrame
+        df = pd.DataFrame(data)
+        df_clean = df[['Nm', 'CZG', 'SecurityID']].copy()
+        df_clean['CZG'] = pd.to_numeric(df_clean['CZG'], errors='coerce').fillna(0.0)
 
-        # Extract relevant fields
-        stocks = []
-        for stock in stocks_raw:
-            if stock.get("priority", 0) == 0:
-                try:
-                    pChange = float(stock.get("pChange", 0) or 0)
-                    totalTradedValue = float(stock.get("totalTradedValue", 0) or 0)
-                except (ValueError, TypeError):
-                    pChange = 0.0
-                    totalTradedValue = 0.0
+        # 3️⃣ Count gainers, losers, neutral
+        gainers = int((df_clean['CZG'] > 0.03).sum())
+        losers = int((df_clean['CZG'] < -0.03).sum())
+        neutral = int(((df_clean['CZG'] >= -0.03) & (df_clean['CZG'] <= 0.03)).sum())
 
-                stocks.append({
-                    "symbol": stock.get("symbol", "N/A"),
-                    "pChange": pChange,
-                    "totalTradedValue": totalTradedValue
-                })
+        # 4️⃣ Select top N by CZG
+        top_df = df_clean.sort_values(by='CZG', ascending=False).head(n)
 
-        # Sort by % change
-        top_stocks = sorted(stocks, key=lambda x: x["pChange"], reverse=True)[:n]
+        # 5️⃣ Fetch latest security info and calculate turnover
+        def fetch_security_info(security_id):
+            try:
+                url = f"https://api.stockedge.com/Api/SecurityDashboardApi/GetLatestSecurityInfo/{security_id}?lang=en"
+                res = requests.get(url, headers=HEADERS, timeout=5)
+                info = res.json()
 
-        # ✅ Concatenate ".NS" to all symbols
-        symbols = [s["symbol"] + ".NS" for s in top_stocks if s.get("symbol")]
+                # Prefer NSE listing, else BSE
+                listing = next((l for l in info.get('Listings', []) if l['ExchangeName'] == "NSE"), None)
+                if not listing and info.get('Listings'):
+                    listing = info['Listings'][0]
 
-        # ✅ Post the symbols to external endpoint with error handling
+                if listing:
+                    symbol = listing.get('ListingSymbol', info.get('Name'))
+                    c = listing.get('C', 0.0)
+                    tq = listing.get('TQ', 0.0)
+                    turnover = float(c * tq)
+                    return symbol, turnover
+                else:
+                    return info.get('Name'), 0.0
+            except Exception:
+                return "N/A", 0.0
+
+        # 6️⃣ Build top stocks list
+        stocks_list = []
+        for _, row in top_df.iterrows():
+            symbol, turnover = fetch_security_info(row['SecurityID'])
+            stocks_list.append({
+                "Symbol": symbol,
+                "%Chg": float(row['CZG']),
+                "Turnover": turnover
+            })
+
+        # Sort by % change descending
+        stocks_list = sorted(stocks_list, key=lambda x: x['%Chg'], reverse=True)
+
+        # 7️⃣ Post symbols to external endpoint
+        symbols = [s["Symbol"] for s in stocks_list if s.get("Symbol")]
         try:
-            resp = requests.post(
-                POST_ENDPOINT,
-                json={"symbols": symbols},
-                timeout=10
-            )
+            resp = requests.post(POST_ENDPOINT, json={"symbols": symbols}, timeout=10)
             if resp.status_code != 200:
                 print(f"⚠️ POST failed: {resp.status_code} - {resp.text}")
             else:
@@ -63,21 +86,22 @@ def fetch_top_stocks(n=28):
         except requests.exceptions.RequestException as e:
             print("❌ Error posting symbols:", str(e))
 
-        # Normal response
         return {
-            "summary": summary,
-            "stocks": top_stocks
+            "gainers": gainers,
+            "losers": losers,
+            "neutral": neutral,
+            "stocks": stocks_list
         }
 
     except Exception as e:
-        # Catch *any* error and return safely
         print("❌ Error in fetch_top_stocks:", str(e))
         traceback.print_exc()
-
         return {
             "error": str(e),
             "traceback": traceback.format_exc(),
-            "summary": {},
+            "gainers": 0,
+            "losers": 0,
+            "neutral": 0,
             "stocks": []
         }
 
@@ -86,7 +110,6 @@ def fetch_top_stocks(n=28):
 def top_stocks():
     data = fetch_top_stocks(28)
     if "error" in data:
-        # return 500 if there was an error
         return jsonify(data), 500
     return jsonify(data), 200
 
