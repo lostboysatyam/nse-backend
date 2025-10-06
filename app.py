@@ -75,7 +75,7 @@ def fetch_top_stocks(n=28):
         stocks_list = sorted(stocks_list, key=lambda x: x['pChange'], reverse=True)
 
         # Post externally
-        symbols = [s["symbol"] for s in stocks_list if s.get("symbol") not in ("N/A", None)]
+        symbols = [s["symbol"] + ".NS" for s in stocks_list if s.get("symbol") not in ("N/A", None)]
         try:
             resp = requests.post(POST_ENDPOINT, json={"symbols": symbols}, timeout=10)
             if resp.status_code == 200:
