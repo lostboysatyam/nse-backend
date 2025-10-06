@@ -21,9 +21,14 @@ MARKET_END   = (15, 20)
 
 def is_market_open():
     now = datetime.now(IST)
+    # Weekday: Monday=0, ..., Friday=4
+    if now.weekday() > 4:  
+        return False
+
     start = now.replace(hour=MARKET_START[0], minute=MARKET_START[1], second=0, microsecond=0)
-    end = now.replace(hour=MARKET_END[0], minute=MARKET_END[1], second=0, microsecond=0)
+    end   = now.replace(hour=MARKET_END[0],   minute=MARKET_END[1],   second=0, microsecond=0)
     return start <= now <= end
+
 
 
 def fetch_top_stocks(n=28):
