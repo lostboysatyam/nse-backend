@@ -1,4 +1,5 @@
 Flask==2.3.3
+pytz==2025.7
 flask-cors==4.0.1
 pandas==2.2.1
 gunicorn==21.2.0
