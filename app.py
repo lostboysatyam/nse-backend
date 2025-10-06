@@ -1,13 +1,8 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-import requests
-import pandas as pd
-import traceback
-import os
-import threading
-import time
-from datetime import datetime, timedelta
-import pytz  # for IST timezone
+import requests, pandas as pd, traceback, os, threading, time
+from datetime import datetime
+import pytz
 
 app = Flask(__name__)
 CORS(app)
@@ -18,14 +13,8 @@ INDEX_URL = "https://api.stockedge.com/Api/SecurityDashboardApi/GetComposedIndex
 
 # Cache
 cache = {"data": None, "last_update": None}
-
-# IST timezone
 IST = pytz.timezone("Asia/Kolkata")
-
-# Refresh interval in seconds
-REFRESH_INTERVAL = 150  # 2.5 minutes
-
-# Market timings
+REFRESH_INTERVAL = 150  # seconds
 MARKET_START = (9, 15)
 MARKET_END   = (15, 20)
 
@@ -38,7 +27,7 @@ def is_market_open():
 
 
 def fetch_top_stocks(n=28):
-    """Your existing StockEdge fetching logic"""
+    """Your existing StockEdge fetch logic"""
     try:
         resp = requests.get(INDEX_URL, headers=HEADERS, timeout=10)
         data = resp.json()
@@ -50,7 +39,7 @@ def fetch_top_stocks(n=28):
         df_clean['CZG'] = pd.to_numeric(df_clean['CZG'], errors='coerce').fillna(0.0)
 
         gainers = int((df_clean['CZG'] > 0.03).sum())
-        losers = int((df_clean['CZG'] < -0.03).sum())
+        losers  = int((df_clean['CZG'] < -0.03).sum())
         neutral = int(((df_clean['CZG'] >= -0.03) & (df_clean['CZG'] <= 0.03)).sum())
 
         top_df = df_clean.sort_values(by='CZG', ascending=False).head(n)
@@ -68,77 +57,56 @@ def fetch_top_stocks(n=28):
                     symbol = listing.get('ListingSymbol', info.get('Name'))
                     c = listing.get('C', 0.0)
                     tq = listing.get('TQ', 0.0)
-                    turnover = float(c * tq)
-                    return symbol, turnover
-                else:
-                    return info.get('Name'), 0.0
-            except Exception:
+                    return symbol, float(c * tq)
+                return info.get('Name'), 0.0
+            except:
                 return "N/A", 0.0
 
         stocks_list = []
         for _, row in top_df.iterrows():
             symbol, turnover = fetch_security_info(row['SecurityID'])
-            stocks_list.append({
-                "symbol": symbol,
-                "pChange": float(row['CZG']),
-                "totalTradedValue": turnover
-            })
+            stocks_list.append({"symbol": symbol, "pChange": float(row['CZG']), "totalTradedValue": turnover})
 
         stocks_list = sorted(stocks_list, key=lambda x: x['pChange'], reverse=True)
 
-        # Post symbols externally
+        # Post externally
         symbols = [s["symbol"] for s in stocks_list if s.get("symbol") not in ("N/A", None)]
         try:
             resp = requests.post(POST_ENDPOINT, json={"symbols": symbols}, timeout=10)
-            if resp.status_code != 200:
-                print(f"⚠️ POST failed: {resp.status_code} - {resp.text}")
-            else:
-                print(f"✅ Symbols posted successfully ({len(symbols)} symbols).")
-        except requests.exceptions.RequestException as e:
-            print("❌ Error posting symbols:", str(e))
+            if resp.status_code == 200:
+                print(f"✅ Symbols posted ({len(symbols)})")
+        except:
+            pass
 
-        return {
-            "gainers": gainers,
-            "losers": losers,
-            "neutral": neutral,
-            "stocks": stocks_list
-        }
+        return {"gainers": gainers, "losers": losers, "neutral": neutral, "stocks": stocks_list}
 
     except Exception as e:
-        print("❌ Error in fetch_top_stocks:", str(e))
+        print("❌ Error in fetch_top_stocks:", e)
         traceback.print_exc()
-        return {
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "gainers": 0,
-            "losers": 0,
-            "neutral": 0,
-            "stocks": []
-        }
+        return {"error": str(e), "gainers": 0, "losers": 0, "neutral": 0, "stocks": []}
 
 
 def refresh_cache_loop():
     while True:
         if is_market_open():
             print("⏱ Refreshing cache...")
-            data = fetch_top_stocks(28)
-            cache['data'] = data
+            cache['data'] = fetch_top_stocks()
             cache['last_update'] = datetime.now(IST)
         time.sleep(REFRESH_INTERVAL)
 
 
 @app.route("/top-stocks", methods=['GET'])
 def top_stocks():
-    if cache['data'] is not None:
-        return jsonify(cache['data']), 200
-    else:
-        return jsonify({"error": "Data not ready"}), 503
+    if cache['data'] is None:
+        # Trigger fetch on first call even if market closed
+        print("⚡ First fetch triggered (cache empty)")
+        cache['data'] = fetch_top_stocks()
+        cache['last_update'] = datetime.now(IST)
+
+    return jsonify(cache['data']), 200
 
 
 if __name__ == "__main__":
-    # Start background refresh thread
-    import threading
     threading.Thread(target=refresh_cache_loop, daemon=True).start()
-
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
