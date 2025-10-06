@@ -62,21 +62,21 @@ def fetch_top_stocks(n=28):
             except Exception:
                 return "N/A", 0.0
 
-        # 6️⃣ Build top stocks list
+        # 6️⃣ Build top stocks list (frontend expects lowercase keys)
         stocks_list = []
         for _, row in top_df.iterrows():
             symbol, turnover = fetch_security_info(row['SecurityID'])
             stocks_list.append({
-                "Symbol": symbol,
-                "%Chg": float(row['CZG']),
-                "Turnover": turnover
+                "symbol": symbol,
+                "pChange": float(row['CZG']),
+                "totalTradedValue": turnover
             })
 
-        # Sort by % change descending
-        stocks_list = sorted(stocks_list, key=lambda x: x['%Chg'], reverse=True)
+        # 7️⃣ Sort correctly (by pChange)
+        stocks_list = sorted(stocks_list, key=lambda x: x['pChange'], reverse=True)
 
-        # 7️⃣ Post symbols to external endpoint
-        symbols = [s["Symbol"] for s in stocks_list if s.get("Symbol")]
+        # 8️⃣ Post symbols to external endpoint (only valid ones)
+        symbols = [s["symbol"] for s in stocks_list if s.get("symbol") not in ("N/A", None)]
         try:
             resp = requests.post(POST_ENDPOINT, json={"symbols": symbols}, timeout=10)
             if resp.status_code != 200:
@@ -86,6 +86,7 @@ def fetch_top_stocks(n=28):
         except requests.exceptions.RequestException as e:
             print("❌ Error posting symbols:", str(e))
 
+        # ✅ Return clean JSON matching frontend
         return {
             "gainers": gainers,
             "losers": losers,
