@@ -43,9 +43,9 @@ def fetch_top_stocks(n=28):
         df_clean = df[['Nm', 'CZG', 'SecurityID']].copy()
         df_clean['CZG'] = pd.to_numeric(df_clean['CZG'], errors='coerce').fillna(0.0)
 
-        gainers = int((df_clean['CZG'] > 0.03).sum())
-        losers  = int((df_clean['CZG'] < -0.03).sum())
-        neutral = int(((df_clean['CZG'] >= -0.03) & (df_clean['CZG'] <= 0.03)).sum())
+        gainers = int((df_clean['CZG'] > 0.015).sum())
+        losers  = int((df_clean['CZG'] < -0.015).sum())
+        neutral = int(((df_clean['CZG'] >= -0.015) & (df_clean['CZG'] <= 0.015)).sum())
 
         top_df = df_clean.sort_values(by='CZG', ascending=False).head(n)
 
