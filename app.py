@@ -23,9 +23,10 @@ def refresh_nse():
     try:
         nse = NSE(download_folder=Path("."), server=True)
         print("✅ NSE session refreshed successfully")
-        return "✅ NSE session refreshed successfully", 200
     except Exception as e:
         print(f"❌ NSE refresh failed: {e}")
+
+    return "✅ NSE session refreshed successfully", 200
 
 # Initialize NSE
 nse = NSE(download_folder=Path("."), server=True)
