@@ -81,7 +81,7 @@ def refresh_cache_loop():
         time.sleep(REFRESH_INTERVAL)
 
 
-@app.before_first_request
+@app.before_serving
 def start_background_thread():
     """Start the refresh thread after the first request."""
     print("Starting background cache refresh thread...")
