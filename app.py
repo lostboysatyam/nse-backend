@@ -26,11 +26,15 @@ MARKET_END = (15, 20)
 
 def is_market_open():
     now = datetime.now(IST)
-    if now.weekday() > 4:  # Saturday/Sunday
+    print("Checking market open, now:", now)
+    if now.weekday() > 4:
+        print("Market closed: weekend")
         return False
     start = now.replace(hour=MARKET_START[0], minute=MARKET_START[1], second=0, microsecond=0)
     end = now.replace(hour=MARKET_END[0], minute=MARKET_END[1], second=0, microsecond=0)
+    print(f"Market start: {start}, end: {end}")
     return start <= now <= end
+
 
 
 def fetch_top_stocks(n=28):
