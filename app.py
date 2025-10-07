@@ -3,9 +3,28 @@ from flask_cors import CORS
 from nse import NSE
 from pathlib import Path
 import traceback
+import time
 
 app = Flask(__name__)
 CORS(app)
+
+
+@app.route("/reinitialize-nse", methods=['GET'])
+def refresh_nse():
+    global nse  # ensure we're updating global vars
+    
+    try:
+        print("🔄 Refreshing NSE session...")
+        nse.exit()
+        time.sleep(2)  # give time for file unlock + avoid NSE rate limit
+    except Exception as e:
+        print(f"⚠️ NSE exit failed: {e}")
+
+    try:
+        nse = NSE(download_folder=Path("."), server=True)
+        logging.info("✅ NSE session refreshed successfully")
+    except Exception as e:
+        print(f"❌ NSE refresh failed: {e}")
 
 # Initialize NSE
 nse = NSE(download_folder=Path("."), server=True)
