@@ -2,13 +2,11 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from nse import NSE
 from pathlib import Path
-import requests
-import os
-import traceback
 import threading
 import time
 from datetime import datetime
 import pytz
+import traceback
 
 app = Flask(__name__)
 CORS(app)
@@ -19,7 +17,7 @@ nse = NSE(download_folder=Path("."), server=True)
 # Cache
 cache = {"data": None, "last_update": None}
 IST = pytz.timezone("Asia/Kolkata")
-REFRESH_INTERVAL = 10  # seconds
+REFRESH_INTERVAL = 60  # seconds
 MARKET_START = (9, 15)
 MARKET_END = (15, 20)
 
@@ -36,10 +34,8 @@ def is_market_open():
     return start <= now <= end
 
 
-
 def fetch_top_stocks(n=28):
     try:
-        # Fetch NSE data
         raw_data = nse.listEquityStocksByIndex(index='NIFTY TOTAL MARKET')
         if not raw_data or "data" not in raw_data:
             raise ValueError("Invalid or empty data returned from NSE API")
@@ -47,7 +43,6 @@ def fetch_top_stocks(n=28):
         summary = raw_data.get("advance", {})
         stocks_raw = raw_data.get("data", [])
 
-        # Extract relevant fields
         stocks = []
         for stock in stocks_raw:
             if stock.get("priority", 0) == 0:
@@ -64,34 +59,33 @@ def fetch_top_stocks(n=28):
                     "totalTradedValue": totalTradedValue
                 })
 
-        # Sort by % change
         top_stocks = sorted(stocks, key=lambda x: x["pChange"], reverse=True)[:n]
 
-        return {
-            "summary": summary,
-            "stocks": top_stocks
-        }
+        return {"summary": summary, "stocks": top_stocks}
 
     except Exception as e:
-        # Catch *any* error and return safely
         print("❌ Error in fetch_top_stocks:", str(e))
         traceback.print_exc()
-
-        return {
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "summary": {},
-            "stocks": []
-        }
+        return {"error": str(e), "traceback": traceback.format_exc(), "summary": {}, "stocks": []}
 
 
 def refresh_cache_loop():
+    """Background thread to refresh cache every REFRESH_INTERVAL seconds."""
     while True:
         if is_market_open():
             print("⏱ Refreshing cache...")
             cache['data'] = fetch_top_stocks()
             cache['last_update'] = datetime.now(IST)
+        else:
+            print("Market closed, skipping refresh.")
         time.sleep(REFRESH_INTERVAL)
+
+
+@app.before_first_request
+def start_background_thread():
+    """Start the refresh thread after the first request."""
+    print("Starting background cache refresh thread...")
+    threading.Thread(target=refresh_cache_loop, daemon=True).start()
 
 
 @app.route("/top-stocks", methods=['GET'])
@@ -100,12 +94,10 @@ def top_stocks():
         print("⚡ First fetch triggered (cache empty)")
         cache['data'] = fetch_top_stocks()
         cache['last_update'] = datetime.now(IST)
-
     return jsonify(cache['data']), 200
 
 
 if __name__ == "__main__":
-    print("Starting refresh thread...")
-    threading.Thread(target=refresh_cache_loop, daemon=True).start()
-    port = int(os.environ.get("PORT", 5000))
+    # Only needed for local development; Render ignores this block
+    port = 5000
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
