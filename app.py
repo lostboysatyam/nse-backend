@@ -5,6 +5,10 @@ from pathlib import Path
 import requests
 import os
 import traceback
+import threading
+import time
+from datetime import datetime
+import pytz
 
 app = Flask(__name__)
 CORS(app)
@@ -12,8 +16,21 @@ CORS(app)
 # Initialize NSE
 nse = NSE(download_folder=Path("."), server=True)
 
-# Remote endpoint to post symbols
-POST_ENDPOINT = "https://sat98-yfinchartdata.hf.space/update_symbols"
+# Cache
+cache = {"data": None, "last_update": None}
+IST = pytz.timezone("Asia/Kolkata")
+REFRESH_INTERVAL = 60  # seconds
+MARKET_START = (9, 15)
+MARKET_END = (15, 20)
+
+
+def is_market_open():
+    now = datetime.now(IST)
+    if now.weekday() > 4:  # Saturday/Sunday
+        return False
+    start = now.replace(hour=MARKET_START[0], minute=MARKET_START[1], second=0, microsecond=0)
+    end = now.replace(hour=MARKET_END[0], minute=MARKET_END[1], second=0, microsecond=0)
+    return start <= now <= end
 
 
 def fetch_top_stocks(n=28):
@@ -46,24 +63,6 @@ def fetch_top_stocks(n=28):
         # Sort by % change
         top_stocks = sorted(stocks, key=lambda x: x["pChange"], reverse=True)[:n]
 
-        # ✅ Concatenate ".NS" to all symbols
-        symbols = [s["symbol"] + ".NS" for s in top_stocks if s.get("symbol")]
-
-        # ✅ Post the symbols to external endpoint with error handling
-        try:
-            resp = requests.post(
-                POST_ENDPOINT,
-                json={"symbols": symbols},
-                timeout=10
-            )
-            if resp.status_code != 200:
-                print(f"⚠️ POST failed: {resp.status_code} - {resp.text}")
-            else:
-                print(f"✅ Symbols posted successfully ({len(symbols)} symbols).")
-        except requests.exceptions.RequestException as e:
-            print("❌ Error posting symbols:", str(e))
-
-        # Normal response
         return {
             "summary": summary,
             "stocks": top_stocks
@@ -82,15 +81,26 @@ def fetch_top_stocks(n=28):
         }
 
 
+def refresh_cache_loop():
+    while True:
+        if is_market_open():
+            print("⏱ Refreshing cache...")
+            cache['data'] = fetch_top_stocks()
+            cache['last_update'] = datetime.now(IST)
+        time.sleep(REFRESH_INTERVAL)
+
+
 @app.route("/top-stocks", methods=['GET'])
 def top_stocks():
-    data = fetch_top_stocks(28)
-    if "error" in data:
-        # return 500 if there was an error
-        return jsonify(data), 500
-    return jsonify(data), 200
+    if cache['data'] is None:
+        print("⚡ First fetch triggered (cache empty)")
+        cache['data'] = fetch_top_stocks()
+        cache['last_update'] = datetime.now(IST)
+
+    return jsonify(cache['data']), 200
 
 
 if __name__ == "__main__":
+    threading.Thread(target=refresh_cache_loop, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
