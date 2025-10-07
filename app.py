@@ -11,6 +11,9 @@ import traceback
 app = Flask(__name__)
 CORS(app)
 
+# Start background refresh thread
+threading.Thread(target=refresh_cache_loop, daemon=True).start()
+
 # Initialize NSE
 nse = NSE(download_folder=Path("."), server=True)
 
@@ -79,13 +82,6 @@ def refresh_cache_loop():
         else:
             print("Market closed, skipping refresh.")
         time.sleep(REFRESH_INTERVAL)
-
-
-@app.before_serving
-def start_background_thread():
-    """Start the refresh thread after the first request."""
-    print("Starting background cache refresh thread...")
-    threading.Thread(target=refresh_cache_loop, daemon=True).start()
 
 
 @app.route("/top-stocks", methods=['GET'])
