@@ -2,10 +2,6 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from nse import NSE
 from pathlib import Path
-import threading
-import time
-from datetime import datetime
-import pytz
 import traceback
 
 app = Flask(__name__)
@@ -15,26 +11,11 @@ CORS(app)
 nse = NSE(download_folder=Path("."), server=True)
 
 # Cache
-cache = {"data": None, "last_update": None}
-IST = pytz.timezone("Asia/Kolkata")
-REFRESH_INTERVAL = 60  # seconds
-MARKET_START = (9, 15)
-MARKET_END = (15, 20)
-
-
-def is_market_open():
-    now = datetime.now(IST)
-    print("Checking market open, now:", now)
-    if now.weekday() > 4:
-        print("Market closed: weekend")
-        return False
-    start = now.replace(hour=MARKET_START[0], minute=MARKET_START[1], second=0, microsecond=0)
-    end = now.replace(hour=MARKET_END[0], minute=MARKET_END[1], second=0, microsecond=0)
-    print(f"Market start: {start}, end: {end}")
-    return start <= now <= end
+cache = {"data": None}
 
 
 def fetch_top_stocks(n=28):
+    """Fetch top N NSE stocks by % change."""
     try:
         raw_data = nse.listEquityStocksByIndex(index='NIFTY TOTAL MARKET')
         if not raw_data or "data" not in raw_data:
@@ -69,30 +50,23 @@ def fetch_top_stocks(n=28):
         return {"error": str(e), "traceback": traceback.format_exc(), "summary": {}, "stocks": []}
 
 
-def refresh_cache_loop():
-    """Background thread to refresh cache every REFRESH_INTERVAL seconds."""
-    while True:
-        if is_market_open():
-            print("⏱ Refreshing cache...")
-            cache['data'] = fetch_top_stocks()
-            cache['last_update'] = datetime.now(IST)
-        else:
-            print("Market closed, skipping refresh.")
-        time.sleep(REFRESH_INTERVAL)
-
-# Start background refresh thread
-threading.Thread(target=refresh_cache_loop, daemon=True).start()
-
 @app.route("/top-stocks", methods=['GET'])
 def top_stocks():
+    """Return cached top stocks, fetch if cache is empty."""
     if cache['data'] is None:
-        print("⚡ First fetch triggered (cache empty)")
+        print("⚡ Cache empty, fetching data for the first time...")
         cache['data'] = fetch_top_stocks()
-        cache['last_update'] = datetime.now(IST)
     return jsonify(cache['data']), 200
 
 
+@app.route("/refresh-cache", methods=['GET'])
+def refresh_cache():
+    """Refresh the cache on demand (to be called by external cron)."""
+    print("⏱ Refreshing cache via endpoint...")
+    cache['data'] = fetch_top_stocks()
+    return "Cache refreshed", 200
+
+
 if __name__ == "__main__":
-    # Only needed for local development; Render ignores this block
     port = 5000
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
